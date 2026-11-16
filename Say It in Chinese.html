@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Say It in Chinese</title>
+<script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3/dist/index.js"></script>
+<style>
+  :root { --red:#c8102e; --green:#1a8a4a; --ink:#222; --muted:#777; --bg:#fbf7f0; --card:#fff; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; justify-content:space-between; align-items:center; padding:12px 20px; background:var(--red); color:#fff; }
+  header h1 { font-size:20px; margin:0; }
+  header button { background:rgba(255,255,255,.18); color:#fff; border:1px solid rgba(255,255,255,.5); }
+  main { max-width:760px; margin:0 auto; padding:20px; }
+  button { font:inherit; padding:10px 18px; border-radius:10px; border:1px solid #ccc; background:#fff; cursor:pointer; }
+  button.primary { background:var(--red); color:#fff; border:none; }
+  button:disabled { opacity:.5; cursor:default; }
+  .panel { background:var(--card); border-radius:16px; padding:20px; box-shadow:0 2px 10px rgba(0,0,0,.06); margin-bottom:16px; }
+  .hidden { display:none !important; }
+  .progress { color:var(--muted); text-align:center; margin-bottom:8px; }
+  .pic { height:300px; display:flex; align-items:center; justify-content:center; font-size:180px; }
+  .pic img { max-height:300px; max-width:100%; border-radius:12px; }
+  .mic { display:block; margin:16px auto; width:120px; height:120px; border-radius:50%; font-size:48px; background:var(--red); color:#fff; border:none; }
+  .mic.listening { animation:pulse 1s infinite; background:#e0533a; }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+  .heard { text-align:center; font-size:26px; min-height:40px; }
+  .result { text-align:center; font-size:30px; font-weight:bold; min-height:44px; margin-top:6px; }
+  .ok { color:var(--green); } .no { color:var(--red); }
+  .row { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:12px; }
+  .hint { text-align:center; color:var(--muted); font-size:15px; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { padding:8px; border-bottom:1px solid #eee; text-align:left; vertical-align:middle; }
+  td .thumb { width:56px; height:56px; display:flex; align-items:center; justify-content:center; font-size:40px; }
+  td .thumb img { max-width:56px; max-height:56px; border-radius:6px; }
+  input[type=text] { font:inherit; padding:8px 10px; border:1px solid #ccc; border-radius:8px; width:100%; }
+  label { font-size:14px; color:var(--muted); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .warn { background:#fff3cd; border:1px solid #f0d58a; padding:10px 14px; border-radius:10px; margin-bottom:12px; }
+  .result.pop { animation:pop .6s ease; }
+  @keyframes pop { 0%{transform:scale(.3);opacity:0} 60%{transform:scale(1.25)} 100%{transform:scale(1);opacity:1} }
+  .pic.win { animation:wiggle .6s ease; }
+  @keyframes wiggle { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-6deg) scale(1.05)} 75%{transform:rotate(6deg) scale(1.05)} }
+  .shake { animation:shake .4s; }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-8px)} 75%{transform:translateX(8px)} }
+  .mic.on { background:var(--green); }
+  #fx { position:fixed; inset:0; pointer-events:none; z-index:99; }
+  .streak { text-align:center; color:#e08a00; font-weight:bold; min-height:22px; }
+  textarea { width:100%; height:120px; font:inherit; font-size:14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Say It in Chinese 🎤</h1>
+  <button id="modeBtn" class="hidden">Teacher</button>
+</header>
+<canvas id="fx"></canvas>
+<main>
+  <div id="noSupport" class="warn hidden">Speech recognition is not supported in this browser. Please open this page in <b>Google Chrome</b> and allow the microphone.</div>
+
+  <!-- 学生端 -->
+  <section id="student">
+    <div id="startPanel" class="panel">
+      <h2 style="margin-top:0">Ready?</h2>
+      <label>Class</label>
+      <select id="stuClass" style="font:inherit;padding:8px 10px;border:1px solid #ccc;border-radius:8px;width:100%;margin-bottom:10px">
+        <option value="">— Choose your class —</option>
+        <option>6A</option><option>6B</option><option>6AB</option><option>6BB</option>
+        <option>7A</option><option>7B</option><option>7AB</option><option>7BB</option>
+      </select>
+      <div id="unitWrap" class="hidden">
+        <label>Lesson</label>
+        <select id="stuUnit" style="font:inherit;padding:8px 10px;border:1px solid #ccc;border-radius:8px;width:100%;margin-bottom:10px"></select>
+      </div>
+      <label>Your name</label>
+      <input type="text" id="stuName" placeholder="e.g. Emma">
+      <div class="row"><button class="primary" id="startBtn">Start</button></div>
+      <p class="hint">Look at the picture, press 🎤, and say it in Chinese.<br>Say it right to pass!</p>
+    </div>
+
+    <div id="quizPanel" class="panel hidden">
+      <div class="progress" id="progress"></div>
+      <div class="pic" id="pic"></div>
+      <button class="mic" id="micBtn" title="Press and speak">🎤</button>
+      <div class="heard" id="heard"></div>
+      <div class="result" id="result"></div>
+      <div class="streak" id="streak"></div>
+      <div class="row">
+        <button id="hintBtn">Hint</button>
+        <button id="skipBtn">Skip</button>
+        <button id="nextBtn" class="primary hidden">Next →</button>
+      </div>
+      <p class="hint" id="hintText"></p>
+    </div>
+
+    <div id="donePanel" class="panel hidden">
+      <h2 style="margin-top:0">All done! 🎉</h2>
+      <div id="summary"></div>
+      <label>Your record (copy and turn it in)</label>
+      <textarea id="record" readonly></textarea>
+      <div class="row">
+        <button id="copyBtn">Copy record</button>
+        <button class="primary" id="againBtn">Try again</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 老师端 -->
+  <section id="teacher" class="hidden">
+    <div class="panel">
+      <h2 style="margin-top:0">添加题目</h2>
+      <div class="grid2">
+        <div>
+          <label>正确答案（汉字，多个可接受答案用 / 分开）</label>
+          <input type="text" id="newAns" placeholder="例如：苹果 / 苹果儿">
+        </div>
+        <div>
+          <label>提示（可选，例如拼音）</label>
+          <input type="text" id="newHint" placeholder="píngguǒ">
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <label>单元 / 课（可选，学生可以按单元练习）</label>
+        <input type="text" id="newUnit" placeholder="例如：Unit 3 水果" list="unitList">
+        <datalist id="unitList"></datalist>
+      </div>
+      <div class="grid2" style="margin-top:10px">
+        <div>
+          <label>图片（上传）</label>
+          <input type="file" id="newImg" accept="image/*">
+        </div>
+        <div>
+          <label>或者用 emoji</label>
+          <input type="text" id="newEmoji" placeholder="🍎">
+        </div>
+      </div>
+      <div class="row"><button class="primary" id="addBtn">添加</button></div>
+    </div>
+
+    <div class="panel">
+      <h2 style="margin-top:0">题目列表</h2>
+      <label><input type="checkbox" id="optShuffle" checked> 随机顺序</label> &nbsp;
+      <br><label>判分宽松度：
+        <select id="optLevel" style="font:inherit">
+          <option value="strict">严格 — 汉字完全一致</option>
+          <option value="normal">普通 — 读音对就行（不看声调）</option>
+          <option value="lenient">宽松 — 读音接近也算（推荐初学者）</option>
+        </select></label>
+      <table><tbody id="list"></tbody></table>
+      <div class="row">
+        <button id="exportBtn">导出题库</button>
+        <button id="importBtn">导入题库</button>
+        <input type="file" id="importFile" accept=".json" class="hidden">
+        <button id="resetBtn">放弃修改，恢复已发布版本</button>
+      </div>
+      <p class="hint">修改只保存在这台电脑的浏览器里，学生看不到。<br>改好后点下面的按钮，下载新的网页文件，再上传替换网上的那个，学生就能看到新题了。</p>
+      <div class="row"><button class="primary" id="publishBtn">⬇ 生成发布版网页（index.html）</button></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const DEMO = [
+  { ans:"苹果", hint:"píngguǒ", emoji:"🍎" },
+  { ans:"狗", hint:"gǒu", emoji:"🐶" },
+  { ans:"猫", hint:"māo", emoji:"🐱" },
+  { ans:"书", hint:"shū", emoji:"📚" },
+  { ans:"水", hint:"shuǐ", emoji:"💧" },
+];
+// 发布的题库直接写在这一行里（由「生成发布版网页」自动替换）
+const EMBED = /*BANK*/{"cards": [{"ans": "数学课/数学", "hint": "shùxué kè", "img": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzNiAzNiI+PHBhdGggZmlsbD0iI0NDRDZERCIgZD0iTTMgMTZ2LTJoMzB2MnptMCA3di0yaDMwdjJ6bTAgN3YtMmgzMHYyek0zIDlWN2gzMHYyeiIvPjxwYXRoIGZpbGw9IiNENUFCODgiIGQ9Ik0zNSAzM1YxYTEgMSAwIDAgMC0xLTFoLTFhMSAxIDAgMCAwLTEgMUg0YTEgMSAwIDAgMC0xLTFIMmExIDEgMCAwIDAtMSAxdjMyaDM0ek00IDRoMjh2MjlINFY0eiIvPjxwYXRoIGZpbGw9IiMzQjk0RDkiIGQ9Ik0xOSA1LjVBMS41IDEuNSAwIDAgMCAxNy41IDdhMS41IDEuNSAwIDEgMC0zIDAgMS41IDEuNSAwIDEgMC0zIDAgMS41IDEuNSAwIDEgMC0zIDAgMS41IDEuNSAwIDEgMC0zIDB2MmExLjUgMS41IDAgMSAwIDMgMCAxLjUgMS41IDAgMSAwIDMgMCAxLjUgMS41IDAgMSAwIDMgMCAxLjUgMS41IDAgMSAwIDMgMCAxLjUgMS41IDAgMSAwIDMgMFY3QTEuNSAxLjUgMCAwIDAgMTkgNS41eiIvPjxwYXRoIGZpbGw9IiNCRTE5MzEiIGQ9Ik0xOSAxMi41YTEuNSAxLjUgMCAwIDAtMS41IDEuNSAxLjUgMS41IDAgMSAwLTMgMCAxLjUgMS41IDAgMSAwLTMgMCAxLjUgMS41IDAgMSAwLTMgMCAxLjUgMS41IDAgMSAwLTMgMHYyYTEuNSAxLjUgMCAxIDAgMyAwIDEuNSAxLjUgMCAxIDAgMyAwIDEuNSAxLjUgMCAxIDAgMyAwIDEuNSAxLjUgMCAxIDAgMyAwIDEuNSAxLjUgMCAxIDAgMyAwdi0yYTEuNSAxLjUgMCAwIDAtMS41LTEuNXoiLz48cGF0aCBmaWxsPSIjNUM5MTNCIiBkPSJNMTkgMTkuNWExLjUgMS41IDAgMCAwLTEuNSAxLjUgMS41IDEuNSAwIDEgMC0zIDAgMS41IDEuNSAwIDEgMC0zIDAgMS41IDEuNSAwIDEgMC0zIDAgMS41IDEuNSAwIDEgMC0zIDB2MmExLjUgMS41IDAgMSAwIDMgMCAxLjUgMS41IDAgMSAwIDMgMCAxLjUgMS41IDAgMSAwIDMgMCAxLjUgMS41IDAgMSAwIDMgMCAxLjUgMS41IDAgMSAwIDMgMHYtMmExLjUgMS41IDAgMCAwLTEuNS0xLjV6Ii8+PHBhdGggZmlsbD0iI0ZGQUMzMyIgZD0iTTE5IDI2LjVhMS41IDEuNSAwIDAgMC0xLjUgMS41IDEuNSAxLjUgMCAxIDAtMyAwIDEuNSAxLjUgMCAxIDAtMyAwIDEuNSAxLjUgMCAxIDAtMyAwIDEuNSAxLjUgMCAxIDAtMyAwdjJhMS41IDEuNSAwIDEgMCAzIDAgMS41IDEuNSAwIDEgMCAzIDAgMS41IDEuNSAwIDEgMCAzIDAgMS41IDEuNSAwIDEgMCAzIDAgMS41IDEuNSAwIDEgMCAzIDB2LTJhMS41IDEuNSAwIDAgMC0xLjUtMS41eiIvPjxwYXRoIGZpbGw9IiMzQjk0RDkiIGQ9Ik0yOSAxMC41QTEuNSAxLjUgMCAwIDEgMjcuNSA5VjdhMS41IDEuNSAwIDEgMSAzIDB2MmExLjUgMS41IDAgMCAxLTEuNSAxLjV6Ii8+PHBhdGggZmlsbD0iI0JFMTkzMSIgZD0iTTI5IDE3LjVhMS41IDEuNSAwIDAgMS0xLjUtMS41di0yYTEuNSAxLjUgMCAxIDEgMyAwdjJhMS41IDEuNSAwIDAgMS0xLjUgMS41eiIvPjxwYXRoIGZpbGw9IiM1QzkxM0IiIGQ9Ik0yOSAyNC41YTEuNSAxLjUgMCAwIDEtMS41LTEuNXYtMmExLjUgMS41IDAgMCAxIDMgMHYyYTEuNSAxLjUgMCAwIDEtMS41IDEuNXoiLz48cGF0aCBmaWxsPSIjRkZBQzMzIiBkPSJNMjkgMzEuNWExLjUgMS41IDAgMCAxLTEuNS0xLjV2LTJhMS41IDEuNSAwIDAgMSAzIDB2MmExLjUgMS41IDAgMCAxLTEuNSAxLjV6Ii8+PHBhdGggZmlsbD0iI0JGNjk1MiIgZD0iTTM1IDMzSDFhMSAxIDAgMCAwLTEgMXYxYTEgMSAwIDAgMCAxIDFoMzRhMSAxIDAgMCAwIDEtMXYtMWExIDEgMCAwIDAtMS0xeiIvPjwvc3ZnPg==", "unit": "School Subjects"}, {"ans": "科学课/科学", "hint": "kēxué kè", "img": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzNiAzNiI+PGcgZmlsbD0iIzY2NzU3RiI+PHBhdGggZD0ibTE5Ljc4IDIxLjM0NS02LjM0MS02LjM0Mi0uMzg5IDQuMzggMi4zNSAyLjM1MXoiLz48cGF0aCBkPSJNMTUuNCAyMi4yMzNhLjUwNy41MDcgMCAwIDEtLjM1NC0uMTQ2bC0yLjM1MS0yLjM1MWEuNTAxLjUwMSAwIDAgMS0uMTQ1LS4zOTdsLjM4OS00LjM4YS41LjUgMCAwIDEgLjg1MS0uMzA5bDYuMzQxIDYuMzQyYS41LjUgMCAwIDEtLjMxLjg1MWwtNC4zNzkuMzg5LS4wNDIuMDAxem0tMS44MzItMy4wMzkgMi4wMjEgMi4wMjEgMy4wODEtLjI3My00LjgyOC00LjgyOC0uMjc0IDMuMDh6Ii8+PC9nPjxwYXRoIGZpbGw9IiM4ODk5QTYiIGQ9Ik0zMSAzMmgtM2MwLTMuMzE0LTIuNjMtNi01Ljg3NS02LTMuMjQ0IDAtNS44NzUgMi42ODYtNS44NzUgNkg4LjczYTIgMiAwIDAgMC00IDAgMiAyIDAgMCAwIDAgNEgzMWEyIDIgMCAwIDAgMC00eiIvPjxwYXRoIGZpbGw9IiM4ODk5QTYiIGQ9Ik0yMCAxMHY0YTcgNyAwIDEgMSAwIDE0aC04LjQ4NWMyLjAxOCAyLjQ0MyA1LjA2OSA0IDguNDg1IDQgNi4wNzUgMCAxMS00LjkyNSAxMS0xMXMtNC45MjUtMTEtMTEtMTF6Ii8+PHBhdGggZmlsbD0iIzY3NzU3RiIgZD0iTTE2LjQxNCAzMC40MTRhMiAyIDAgMCAxLTIuODI4IDBsLTkuODk5LTkuOWEyIDIgMCAxIDEgMi44MjktMi44MjhsOS44OTkgOS45YTIgMiAwIDAgMS0uMDAxIDIuODI4em0tNy4yMjUtMS43ODZhMSAxIDAgMSAxIC4yNzggMS45OGwtNS45NDIuODM0YTEgMSAwIDEgMS0uMjc3LTEuOTgxbDUuOTQxLS44MzN6Ii8+PHBhdGggZmlsbD0iIzY2NzU3RiIgZD0ibTI3LjM0MSAyLjk4IDQuNDYxIDQuNDYxLTMuODA2IDMuODA3LTQuNDYxLTQuNDYxeiIvPjxwYXRoIGZpbGw9IiNBQUI4QzIiIGQ9Ik0zNC4wMzcgNy4wODNhMi4xMiAyLjEyIDAgMCAxLTIuOTk3IDBsLTMuMzM5LTMuMzRBMi4xMiAyLjEyIDAgMCAxIDMwLjY5Ni43NDdsMy4zNDIgMy4zNGEyLjEyIDIuMTIgMCAwIDEtLjAwMSAyLjk5NnptLTE0LjU2IDE1LjAyNi02LjgwMi02LjgwM2ExLjAwMyAxLjAwMyAwIDAgMSAwLTEuNDE0bDkuODU4LTkuODU4YTEuMDAzIDEuMDAzIDAgMCAxIDEuNDE0IDBsNi44MDEgNi44MDNhMS4wMDMgMS4wMDMgMCAwIDEgMCAxLjQxNGwtOS44NTggOS44NThhMS4wMDEgMS4wMDEgMCAwIDEtMS40MTMgMHoiLz48cGF0aCBmaWxsPSIjRTFFOEVEIiBkPSJtMTMuNzY2IDEyLjggMS42MzgtMS42MzcgOC4yMTYgOC4yMTYtMS42MzggMS42Mzd6Ii8+PC9zdmc+", "unit": "School Subjects"}, {"ans": "社会课/社会", "hint": "shèhuì kè", "img": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzNiAzNiI+PHBhdGggZmlsbD0iI0NDRDZERCIgZD0iTTEyIDcuNjA3IDMgNS4xOTZjLTEuNjU3LS40NDQtMyAuNTM5LTMgMi4xOTd2MjBjMCAxLjY1NiAxLjM0MyAzLjM1OSAzIDMuODA0bDkgMi40MTFWNy42MDd6bTEyIDIyLjc4NiA5IDIuNDExYzEuNjU2LjQ0MyAzLS41NCAzLTIuMTk2di0yMGMwLTEuNjU3LTEuMzQ0LTMuMzYtMy0zLjgwNGwtOS0yLjQxMXYyNnoiLz48cGF0aCBmaWxsPSIjRTFFOEVEIiBkPSJtMjQgMzAuMzkyLTEyIDMuMjE1di0yNmwxMi0zLjIxNXoiLz48cGF0aCBmaWxsPSIjNTVBQ0VFIiBkPSJNMTIgOS42MDcgNCA3LjQ2M2MtMS4xMDQtLjI5Ni0yIC4zNi0yIDEuNDY0djE4YzAgMS4xMDQuODk2IDIuMjQgMiAyLjUzNWw4IDIuMTQ1di0yMnptMjAtMS4wNzItOC0yLjE0NHYyMmw4IDIuMTQ0YzEuMTA0LjI5NiAyLS4zNTkgMi0xLjQ2NXYtMThjMC0xLjEwMy0uODk2LTIuMjM5LTItMi41MzV6Ii8+PHBhdGggZmlsbD0iIzg4QzlGOSIgZD0ibTI0IDI4LjM5Mi0xMiAzLjIxNXYtMjJsMTItMy4yMTV6Ii8+PHBhdGggZmlsbD0iIzVDOTEzQiIgZD0iTTEyIDIxLjUwNmMtLjI2OC4wMDYtLjU5NS4xMDQtLjg0NS4xNDUtLjQzNi4wNzMtLjMyOS41MTctLjQ2My40NDNhMi44NDQgMi44NDQgMCAwIDEtLjgxMi0uNjU4Yy0uMzM3LS4zOTQuMjUtLjQ3Ny40MTgtLjYyMi4xNjgtLjE0NS0uMzE2LS4xNzItLjQ4NS0uMzMyLS4xNjktLjE1OS0uNDcxLjEwNC0uNzM5LS4yNzYtLjI3LS4zNzYtLjEwMS0uNzktLjEzMy0xLjE4LS4wMzQtLjM5LjQzNi0uMzQxLjczOS0uMzM0LjMwMy4wMDMuNTM4LjE0NC41MzguNjAyIDAgLjQ1Ni4zNy43MDguMjY5LjE0Ni0uMTAxLS41NjEuMTAxLS42NTcuMjM1LS44OS4xMzQtLjIzLjM3LS41NS42NzItMS4wNC4yMjEtLjM1OC4zODktLjI4My42MDYtLjE2NHYtMy4zNDVjLS4wNTUtLjA0NC0uMTEtLjA5LS4xNjUtLjExMy0uMzAzLS4xMzIuMDk2Ljc1My0uMTM5IDEuMTA5LS4yMzcuMzU2LS41OTguMTkzLS45Ny4wOTQtLjM2OS0uMDk5LS43MTMtLjU0NS0uNDQzLTEuMDA3LjI2OC0uNDYyLjc4Mi0uMjY4IDEuMDUxLS42NTMuMjY5LS4zODUtLjk1Ny0uNjcyLTEuMzk0LS45NDEtLjQzOC0uMjcxLS45NjMtLjQwOS0xLjQtLjE0Ni0uNDM3LjI2NC0xLjM3My4xMzMtMS43NDMuMTg2LS4zNy4wNTQtLjQzNi0uMzY5LS41MDMtLjY5My0uMDY3LS4zMjItLjY1My0uMzI5LTEuMjU3LS4zMzgtLjYwNi0uMDEtMS43NDEuMjgxLTEuNTQ3IDEuNzU5LjA2OC41MTQuNjA1LjEyNC43MDcuMDM2LjEwMS0uMDg4LjYwNS4yLjY3MS42MzcuMDY4LjQzOS4wMzUuODg3LS4wOTkgMS4yMzItLjEzNy4zNDUuMzM2IDEuMDA2LjYwNCAxLjYxMi4yNjkuNjA1LjU3My42ODYuNzA3LjcyMy4xMzUuMDM2LjkwOC41ODcuODc1Ljk5Ni0uMDMzLjQxMS43MDYuOTkxIDEuMDA5IDEuMzQuMzAzLjM1LjQ5NC42NjIuODg3Ljg0Ni4zOTMuMTgzLjg1MiAxLjAzNSAxLjA1NCAxLjE2NS4xNTUuMS40MTguNDUxLjU3Ni41OC0uMjA4LjI0Mi0uNjEyLjc0OC0uNjEyIDEuMDI5IDAgLjM4My40NCAxLjEwMy42MDggMS4zLjE2Ny4xOTYuNjUuNDQyLjc1MS44NS4xMDEuNDA3LS4wNyAxLjY0Ni0uMzcyIDEuOTA3LS4zMDQuMjYyLS40MTQgMS4wNDMtLjQxNCAxLjA0M3MuMTA3LjI5My40NjUuMTI0Yy4zMDktLjE0NC43NzYtLjU2NiAxLjA5NC0uODAxdi02LjM3MXoiLz48cGF0aCBmaWxsPSIjNzdCMjU1IiBkPSJNMTIuMjY4IDE3LjQxM2MtLjEuMDE2LS4xODcuMDEyLS4yNjguMDExdi0zLjM0NWMuMjU0LjA2NS41MTIuMzE3LjcwNy43MzYuMjM0LjUwOS42MDQuMDY2LjczOS4zNzQuMTM0LjMwOC44NzUuNzU4LjUwNS43NDItLjM3MS0uMDE1LS43NDEuMDA4LS44NDEuNDU0LS4xMDIuNDQ4LjE2OC43OTQtLjEwMi44MjgtLjI3LjAzMy0uMzcuMTQyLS43NC4yem0yLjU5IDUuNTU4Yy0uNDM2LS4wNzQtLjM1OS0uMDIzLS42MjgtLjU5OS0uMjY4LS41NzctLjQzMS0uNzQzLTEuMDM2LS42NTYtLjYwNS4wODctLjU4My4xMzYtLjc1MS0uMTYzLS4wNzItLjEyOC0uMjQxLS4wODItLjQ0My4wMzF2Ni4zN2MuMDktLjExNC4xNy0uMjExLjIyOC0uMjY3YTEzLjM3IDEzLjM3IDAgMCAwIDEuNDY2LTEuNjQ2Yy40Ny0uNjIxLjMtLjkyNC41MzUtMS40ODEuMjM2LS41NTguNTQxLS42MTcuOTQ0LTEuMTQ1LjQwNS0uNTMuMTIyLS4zNjgtLjMxNS0uNDQ0ek0yNCAxNS43MzFWOS40MTdjLS4wNC4wMDQtLjA2OC4wMTItLjExLjAxNS0uMjA5LjAxMS0uNDgyLjEzNS0uNzc5LjMyLS4wMjQtLjAwNS0uMDQ2LS4wMTYtLjA3LS4wMjEtLjg5Ni0uMTc1LTEuMzEyIDEuMjA1LTIuMDM5IDEuMTUyLS43MjktLjA1My0xLjctLjM0NC0yLjMzMi41MTQtLjYzMS44NTctLjc3NyAxLjUzIDAgMS4yOTRzMS4zMTItMS40MjUgMS43LTEuMDg5Yy4zODguMzM2LjI5LjcyMS0uNjMyIDEuMTA1LS45MjIuMzg1LTEuOTE4LjgxNy0yLjQ1Mi45Ni0uNTM0LjE0My0uNjU1LjUzNC0uMjkyLjgyMi4zNjQuMjg4LS4yMTkuNDcxLS44MjYgMS4wMi0uNjA3LjU0Ny4xNDYuNTEyLjY1Ni43MDUuNTEuMTkzLjg5OC0uMzIzIDEuMTE3LS45MzIuMjE3LS42MDggMS4xNTgtMS41MjEgMS41NS0xLjU0NC4zOTItLjAyMy4zOTIuMTk3LjMxOC42MDItLjAxMy4wNzEuMDAxLjEwMy4wMTEuMTM4LS4xNy41NC0uMzEgMS4wMy0uMzY1IDEuMzA2YTMuMzMyIDMuMzMyIDAgMCAwLS4wMjcuNTk1Yy0uMDg2LjAwNC0uMTgzLjAyMS0uMjQ4LjAwMS0uNDM4LS4xMjktMS40MzQtLjIyLTEuNzAxLjA0My0uMjY3LjI2NS0uNDEyLjUwMi0uNzI4LjcyMy0uMzE3LjIxOS0xLjYwMyAxLjIyNC0xLjYyNyAyLjA4NC0uMDI1Ljg1OS0uMDQ5IDEuODMuNDYxIDEuNzIxLjUxLS4xMDkgMS43NDktLjgyNiAyLjEzNy0xLjI4OC4zODctLjQ2My45MjEtLjUyMiAxLjA5Mi0uMTU2LjE3LjM2OS4wNDguNjQ5LS4xMiAxLjM1NC0uMTcxLjcwOC4xMS45NjMuMzgxIDEuNDY4LjI3My41MDQuNDkxLjc3NS40OTEgMS4xODkgMCAuNDEyLjM4OS43MjMuOTctLjEyM2E3LjE0IDcuMTQgMCAwIDAgLjUzNi0uOTU3Yy40MDktLjQ2OS43NjgtLjkyMy43NTgtMS4wOTZhMTMuNTMgMTMuNTMgMCAwIDEtLjAyNC0uNjI0bC4wOTEtLjIyYy4xMjctLjI5My4yNDEtLjc0Ni4zNjItMS4xNTVhLjE3LjE3IDAgMCAxIC4wMi0uMDI0Yy4yMzctLjMzNy4xODUtLjM1My41OC0uNzU2LjI2NC0uMjcuMjU0LS41MTIuMjE0LS42NzguMTA1LS4xNzUuMTM0LS4yOC0uMDMzLS4yMzVsLS4wMTYuMDA0Yy0uMDAyIDAtLjAwNS4wMTktLjAwNi4wMTQtLjAyMy0uMTQ5LS4yMDYuMDAzLS41MDEuMTQ4LS4yODQuMDA4LS41NjYtLjA2Ni0uNjY4LS4zNjgtLjEzMy0uMzk2LS42MDItLjk5Ni0uNjM5LTEuMzM2LjAwMy0uMDQxLjAwNS0uMDc3LjAxLS4xMjRhLjE2NS4xNjUgMCAwIDEgLjA2OS0uMDg4LjI5LjI5IDAgMCAxIC4xMTItLjAzNWMuMDQxLjExMS4wNzUuMjc5LjA4Ni40NjQuMDI2LjQ3Ny4zOTQuMTk2LjM5NC40OTggMCAuMzAzLjUzLjQ5Mi42NjEuNTQ4LjAzNy4wMTYuMDk0LS4wMjcuMTU5LS4wOTguMDMxLjAxMS4wNi4wMzMuMDkzLjAzNy4yOTIuMDMxLjkyMi0uOTg0IDEuMTE3LTEuMTY0LjEwMi0uMDk1LjEwNC0uMjY5LjAzMy0uMzk0bC4wNTYtLjAyNXoiLz48cGF0aCBmaWxsPSIjNUM5MTNCIiBkPSJNMjcuNjM0IDIwLjIyMWMtLjA1My40NC4xODQuMjAxLjYwNi43MDUuNDIzLjUwOC0uMTA0LjM5NC0uMjg5LjMxNi0uMTg1LS4wOC0uMzctLjEzMS0uNTc5LS41MTgtLjIxMy0uMzkxIDAtLjY5NSAwLTEuMDI3IDAgMCAuMzE2LjA4NC4yNjIuNTI0em0uMzYyLS45MDFjLjM4OS4xNjYuMTE0LS40ODIuMjQ0LS44NDEuMTMyLS4zNTYuMzE2LS4zNjguNTU1LS4zNjMuMjM2LjAwMi40MjItLjE5MS41ODEtLjM4OS4xNTctLjE5OS40NDgtLjQ1NC40MjItLjczMy0uMDI2LS4yNzktLjEwNC0uNDgyLS4yMTItLjg0My0uMTA1LS4zNi4zMTYtLjM2OC41MDItLjcxMS4xODQtLjM0MyAwIDAgLjQyMS0uMDA4LjQyMi0uMDA4LjIzOC0uMDU4LjMxNi0uMjE4LjA4LS4xNTkuMTMzLS4zMjcuMDU0LS42OC0uMDc4LS4zNTMtLjM3LS4xLS42Ni0uMTc3LS4yODktLjA3Ny4xMDYtLjQyNS4xMzItLjc4LjAyNi0uMzU2LjM5Ny0uMTY1LjY2MS0uMTI1LjI2My4wMzkuMzQyLjQ4NC40MjEuNTk3LjA4MS4xMTIuODk1LS4zNjUgMS4xMDgtLjY0MS4yMTEtLjI3NS0uMTg2LS4yOTEtLjA3OS0uNDAzLjEwNi0uMTExLS42MzItLjMzNy0uOTI1LS40NjktLjI4OS0uMTMzLTEuMDI4LS4zNjctMS4zMTgtLjY0OS0uMjg5LS4yODMtMS4zOTYtLjQyNi0xLjY4OC0uMzM3LS4yOTEuMDg2LS40NzYtLjE0My0uNjA2LS40MDYtLjEzMS0uMjYyLS42ODYtLjI5Ny0uODQ0LS40NjctLjE1OC0uMTctLjMxNi4xMjctLjUyOS4xNi0uMjEuMDM1LS4yODkuMDQzLS41NTQtLjIwOS0uMjYzLS4yNTIuMDgtLjM3MS0uMjg4LS42MjEtLjM1NS0uMjM4LS44MTMtLjE4Mi0xLjcxLS41OTF2Ni4zMTRjLjE1Ny4wMTQuMzA5LjAzNi4zNjQuMDUxLjEzMS4wMzUuNDQ4LjU3My40NDguNzg0IDAgLjIxMS4xNTguODI4LjI5MSAxLjE5NS4xMzEuMzY2LjQyLjUwNi42ODYuODE4LjI2NC4zMTIuMzk0LjEzNy4zOTQuMTM3cy0uMTA1LS41NDQtLjEwNS0uOTY1YzAtLjQyNC4zMTYtLjcwMS4zMTYtLjcwMXMuNS41NTguNTI4LjY4NWMuMDI2LjEyOC40MjEuNjU2LjQ0OS44NzYuMDI2LjIxOS4yMzcuNTQ2LjYyNS43MXptMi4wOTItMi4wNjhjLjE4NC4wOC45NzYuMTcxLjU1NC0uMzM0LS40MjMtLjUwNi0uMTA2LS4yOTktLjA1My0uNzM4LjA1My0uNDQtLjI2NC0uNTI0LS4yNjQtLjUyNCAwIC4zMzItLjIxMS42MzggMCAxLjAyNi4yMS4zOS0uNDIzLjQ5LS4yMzcuNTd6bTIuMDA0IDUuMzcxYy0uMTMxLS4yMTctLjQyMS0uMzg1LS43MzgtLjQ2MS0uMzE1LS4wNzYtLjI5LS40OC0uNjA2LS41MzMtLjMxNi0uMDU1LS41NDQtLjM4OS0uNjg2LS41MTItLjMxMi0uMjY2LS4xMDYuMjA5IDAgLjY5OS4xMDYuNDg4LjUwMS4yNDYuODY5LjU4Ni4zNjkuMzQuMzk3LjAxNi43NC4yMjkuMzQyLjIxMS40NzUuNTIuODA0LjU3OC4zMjkuMDU5LS4yNS0uMzY5LS4zODMtLjU4NnptLTMuMDg4LTEuNDMyYy4yNjIuNDAyLjE1OS4wNDMuNTA0LS4wMTYuMzQzLS4wNTktLjI5MS0uNTYxLS41MDItLjc5OS0uMjExLS4yMzgtLjQyLS4zMDEtLjYwNS4wNDktLjIxLjM5OS4zNDIuMzY0LjYwMy43NjZ6bTIuNDAzIDIuNTc5Yy0uMTMzLS4zMzgtLjUxOC0uNzEzLS42NzUtLjkxLS4xNTktLjE5My0uNDA3LS4zMTItLjYxOC0uMjc5LS4yMTIuMDMxLS4zNDMtLjA5Mi0uNDQ4LS4zNjEtLjEwNi0uMjY2LS4yOS0uMjMzLS40NDktLjI0NC0uMTU3LS4wMTItLjc5MS4xMTktMS4xNjEuMjMtLjM2OC4xMTMtLjUzNy4yNTItLjc3OC40NTctLjM4Mi4zMi0uMTcuMTA1IDAgLjQyNC4xNjguMzE4LS4xODcgMS4wNjYtLjIxMyAxLjU0My0uMDI3LjQ3Ny42NzYuMDMxLjkzOS4wMzkuMjY0LjAxMi4xODYtLjE4OS4zOTYtLjMxNC4yMTItLjEyNS4zNDktLjEyOS41NzkuMTcyLjIzMy4zMDUuNTM3LjYxMS41MzcuODgzIDAgLjI3LjgzNC45NDcgMS4xNTEuODUyLjMxNi0uMDk4LjUwMS0uNDA4Ljc5MS0uNjM1LjI5MS0uMjI1LjE4Ni0uODI0LjI2NC0xLjE2OC4wODEtLjM0NC0uMTg1LS4zNTQtLjMxNS0uNjg5eiIvPjwvc3ZnPg==", "unit": "School Subjects"}, {"ans": "体育课/体育", "hint": "tǐyù kè", "img": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzNiAzNiI+PGNpcmNsZSBjeD0iMTgiIGN5PSIxOCIgcj0iMTgiIGZpbGw9IiNGNUY4RkEiLz48cGF0aCBmaWxsPSIjQ0NENkREIiBkPSJNMTggMTFhMSAxIDAgMCAxLTEtMVYzYTEgMSAwIDAgMSAyIDB2N2ExIDEgMCAwIDEtMSAxem0tNi41ODMgNC41YS45OS45OSAwIDAgMS0uMzAyLS4wNDdsLTguMDQxLTIuNTQyYTEgMSAwIDEgMSAuNjAzLTEuOTA3bDguMDQyIDIuNTQyYTEgMSAwIDAgMS0uMzAyIDEuOTU0em0xMy42MjUtLjI5MWExLjAwMSAxLjAwMSAwIDAgMS0uMjc4LTEuOTYxbDYuNzUtMS45NThhMSAxIDAgMCAxIC41NTYgMS45MjFsLTYuNzUgMS45NThhLjk4OS45ODkgMCAwIDEtLjI3OC4wNHptMi4wMDEgMTQuOTU4YTEgMSAwIDAgMS0uODAzLS40MDNsLTUuNDU5LTcuMzMzYTEgMSAwIDEgMSAxLjYwNC0xLjE5NGw1LjQ1OSA3LjMzM2ExIDEgMCAwIDEtLjgwMSAxLjU5N3ptLTE4LjI5NC0uMDgzYTEgMSAwIDAgMS0uODItMS41NzFsNS4xMjUtNy4zNzVhMSAxIDAgMSAxIDEuNjQyIDEuMTQxbC01LjEyNSA3LjM3NWEuOTk2Ljk5NiAwIDAgMS0uODIyLjQzek0zLjUgMjcuMDYyYy0uNDQgMC0uODQ0LS4yOTMtLjk2NS0uNzM4TC4zNDcgMTguMjYyYTEgMSAwIDEgMSAxLjkzMS0uNTIzbDIuMTg4IDguMDYyYS45OTguOTk4IDAgMCAxLS45NjYgMS4yNjF6TTIyIDM0aC05YTEgMSAwIDEgMSAwLTJoOWExIDEgMCAxIDEgMCAyem0xMC4xMjYtNi44NzVhLjk5OS45OTkgMCAwIDEtLjk3MS0xLjIzOWwyLjEyNS04LjYyNWExIDEgMCAxIDEgMS45NDEuNDc5bC0yLjEyNSA4LjYyNWMtLjExMy40NTUtLjUyMS43Ni0uOTcuNzZ6TTMwLjMxMiA3LjY4OGEuOTk4Ljk5OCAwIDAgMS0uNS0uMTM0TDIyLjI1IDMuMTc5YTEgMSAwIDAgMS0uMzY0LTEuMzY3Ljk5OC45OTggMCAwIDEgMS4zNjYtLjM2NWw3LjU2MiA0LjM3NWExIDEgMCAwIDEtLjUwMiAxLjg2NnptLTI0LjgxMSAwYTEgMSAwIDAgMS0uNTg0LTEuODEzbDYuMTg4LTQuNDM4YTEuMDAxIDEuMDAxIDAgMCAxIDEuMTY3IDEuNjI1TDYuMDgzIDcuNWExIDEgMCAwIDEtLjU4Mi4xODh6Ii8+PHBhdGggZmlsbD0iIzMxMzczRCIgZD0ibTI1LjQ5MyAxMy41MTYtNy4yMDgtNS4wODNhMS4wMDIgMS4wMDIgMCAwIDAtMS4xNjEuMDA2bC03LjE2NyA1LjE2N2ExIDEgMCAwIDAtLjM3NSAxLjA5MWwyLjUgOC41ODNhMSAxIDAgMCAwIC45Ni43MkgyMmExIDEgMCAwIDAgLjk0OC0uNjgxbDIuOTE3LTguNjY3YTEgMSAwIDAgMC0uMzcyLTEuMTM2ek0xLjI5MiAxOS41NDJhMSAxIDAgMCAwIC44NzItLjUxbDMuMzc1LTZhMSAxIDAgMCAwIC4xMDgtLjI5MUw2Ljk4IDYuMkEuOTk5Ljk5OSAwIDAgMCA2IDVoLS40MjhDMi4xNDUgOC4yNzcgMCAxMi44ODQgMCAxOGMwIC4yNjYuMDI4LjUyNS4wNC43ODhsLjYwMi41MTRjLjE4Mi4xNTYuNDEzLjI0LjY1LjI0em05LjMyNS0xNi41NDdhLjc0OC43NDggMCAwIDAgLjU1My40MTJsNi4zNzUgMS4wNDJhLjgyMy44MjMgMCAwIDAgLjI0MyAwbDYuMDg0LTFhLjc0OC43NDggMCAwIDAgLjYxMy0uODg5bC0uMjkyLTEuNDQzQTE3LjkxMiAxNy45MTIgMCAwIDAgMTggMGMtMi40MjUgMC00LjczNC40ODYtNi44NDUgMS4zNTZsLS41MjEuOTVhLjc1Mi43NTIgMCAwIDAtLjAxNy42ODl6bTIwLjUxNyAyLjcyNC0xLjUwNC0uMDk1YS43NTguNzU4IDAgMCAwLS42MDkuMjQ5Ljc0MS43NDEgMCAwIDAtLjE3NS42M2wxLjE2NyA2LjE5OGEuNjY2LjY2NiAwIDAgMCAuMDkzLjIyNGMxLjQ5MiAyLjUwNCAzLjE1MiA1LjMwMSAzLjM4MSA1Ljc4Mi4wMjQuMDg0LjA2Mi4wNzkuMTE0LjE1MS4xNC4xOTUuMzcyLjE0Mi42MTIuMTQyaC4wMDdjLjE5OCAwIC4zMjMuMDk0IDEuNzY4LS43NTMuMDAxLS4wODMuMDEyLS4xNjQuMDEyLS4yNDcgMC00Ljc1My0xLjg1Ni05LjA2NC00Ljg2Ni0xMi4yODF6TTE0LjU0MSAzMy4zNzZhLjc1NS43NTUgMCAwIDAtLjE5MS0uNTQ0bC00LjUtNWEuNzQ2Ljc0NiAwIDAgMC0uMjExLS4xNjNjLTUuODg1LTMuMDY5LTUuOTk0LTMuMTA1LTYuMDY2LTMuMTNhLjguOCAwIDAgMC0uMjQyLS4wMzljLS41MzcgMC0uNjk1LjA2NS0xLjE4NSAyLjAyNGExOC4wNDQgMTguMDQ0IDAgMCAwIDEwLjY0NCA4LjcwM2wxLjUtMS4zMzNhLjc1My43NTMgMCAwIDAgLjI1MS0uNTE4em0xNy44MzMtOC41NjdhLjc0Ny43NDcgMCAwIDAtLjU5Mi4wMDVsLTYuMDgzIDIuNjY3YS43MzguNzM4IDAgMCAwLS4yNzQuMjA1bC00LjI1IDUuMDgzYS43NTIuNzUyIDAgMCAwIC4xIDEuMDYyYy42ODMuNTU5IDEuMjYxIDEuMDMgMS43NjcgMS40NGExOC4wMTcgMTguMDE3IDAgMCAwIDEwLjQ1NC04LjE0NmwtLjcxMi0xLjg4OWEuNzQ5Ljc0OSAwIDAgMC0uNDEtLjQyN3oiLz48L3N2Zz4=", "unit": "School Subjects"}, {"ans": "美术课/美术", "hint": "měishù kè", "img": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzNiAzNiI+PHBhdGggZmlsbD0iI0Q5OUU4MiIgZD0iTTE4IDMuMTQzYy05Ljk0MSAwLTE4IDYuOTA4LTE4IDE1LjQyOCAwIDEuMDY2LjEyNiAyLjEwNy4zNjcgMy4xMTJDMi4xNDYgMjQuNzQ0IDMuMzc3IDIyLjgxMiA5IDIwYzUuNzI3LTIuODY0IDAgNC0yIDgtLjYxNSAxLjIzLS4yODIgMi4yNzEuNTYgMy4xMjRDMTAuNTA2IDMyLjkyOCAxNC4xMDQgMzQgMTggMzRjOS45NDEgMCAxOC02LjkwNyAxOC0xNS40MjkgMC04LjUyLTguMDU5LTE1LjQyOC0xOC0xNS40Mjh6bTIuODQ5IDI0LjQ0N2MtLjM5NSAxLjM0Ni0yLjQ2IDEuOTI0LTQuNjEzIDEuMjkxLTIuMTUzLS42MzItMy41NzgtMi4yMzQtMy4xODMtMy41ODEuMzk1LTEuMzQ2IDIuNDYtMS45MjQgNC42MTMtMS4yOSAyLjE1My42MzEgMy41NzggMi4yMzMgMy4xODMgMy41OHoiLz48Y2lyY2xlIGN4PSIxMCIgY3k9IjExIiByPSIzIiBmaWxsPSIjNUM5MTNCIi8+PGNpcmNsZSBjeD0iMjAiIGN5PSI5IiByPSIzIiBmaWxsPSIjMjY5Ii8+PGNpcmNsZSBjeD0iMjkiIGN5PSIxNSIgcj0iMyIgZmlsbD0iI0REMkU0NCIvPjxjaXJjbGUgY3g9IjI4IiBjeT0iMjQiIHI9IjMiIGZpbGw9IiNGRkNDNEQiLz48L3N2Zz4=", "unit": "School Subjects"}, {"ans": "音乐课/音乐", "hint": "yīnyuè kè", "img": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzNiAzNiI+PHBhdGggZmlsbD0iIzVEQURFQyIgZD0iTTM0LjIwOS4yMDYgMTEuNzkxIDIuNzkzQzEwLjgwNiAyLjkwNyAxMCAzLjgxMSAxMCA0LjgwM3YxOC43ODJBNy45NCA3Ljk0IDAgMCAwIDcgMjNjLTMuODY1IDAtNyAyLjY4NS03IDYgMCAzLjMxNCAzLjEzNSA2IDcgNnM3LTIuNjg2IDctNlYxMC41MzlsMTgtMi4wNzd2MTMuMTI0QTcuOTIgNy45MiAwIDAgMCAyOSAyMWMtMy44NjUgMC03IDIuNjg1LTcgNiAwIDMuMzE0IDMuMTM1IDYgNyA2czctMi42ODYgNy02VjEuODAzYzAtLjk5Mi0uODA2LTEuNzEtMS43OTEtMS41OTd6Ii8+PC9zdmc+", "unit": "School Subjects"}, {"ans": "中文课/中文/汉语", "hint": "zhōngwén kè", "img": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzNiAzNiI+PHBhdGggZmlsbD0iI0RFMjkxMCIgZD0iTTM2IDI3YTQgNCAwIDAgMS00IDRINGE0IDQgMCAwIDEtNC00VjlhNCA0IDAgMCAxIDQtNGgyOGE0IDQgMCAwIDEgNCA0djE4eiIvPjxwYXRoIGZpbGw9IiNGRkRFMDIiIGQ9Im0xMS4xMzYgOC45NzcuNzM2LjM1Ni41ODktLjU2Ni0uMTExLjgxLjcyLjM4Ni0uODA0LjE0NC0uMTQ0LjgwNC0uMzg2LS43Mi0uODEuMTExLjU2Ni0uNTg5em00LjY2NSAyLjk0MS0uMzU2LjczNS41NjYuNTktLjgwOS0uMTEyLS4zODYuNzIxLS4xNDQtLjgwNS0uODA1LS4xNDQuNzIxLS4zODYtLjExMi0uODA5LjU5LjU2NnptLS45NTcgMy43NzkuMjY4Ljc3Mi44MTcuMDE3LS42NTEuNDkzLjIzNy43ODMtLjY3MS0uNDY3LS42NzEuNDY3LjIzNi0uNzgzLS42NTEtLjQ5My44MTctLjAxN3ptLTMuNzA4IDMuMjguNzM2LjM1Ni41ODktLjU2Ni0uMTExLjgxLjcyLjM4Ni0uODA0LjE0NC0uMTQ0LjgwNC0uMzg2LS43Mi0uODEuMTExLjU2Ni0uNTg5ek03IDEwLjk1MWwuOTI5IDIuNjcxIDIuODI2LjA1OC0yLjI1MyAxLjcwOC44MTkgMi43MDZMNyAxNi40NzlsLTIuMzIxIDEuNjE1LjgxOS0yLjcwNi0yLjI1My0xLjcwOCAyLjgyNi0uMDU4eiIvPjwvc3ZnPg==", "unit": "School Subjects"}, {"ans": "英文课/英文/英语", "hint": "yīngwén kè", "img": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzNiAzNiI+PHBhdGggZmlsbD0iI0IyMjMzNCIgZD0iTTM1LjQ0NSA3QzM0Ljc1MiA1LjgwOSAzMy40NzcgNSAzMiA1SDE4djJoMTcuNDQ1ek0wIDI1aDM2djJIMHptMTgtOGgxOHYySDE4em0wLTRoMTh2MkgxOHpNMCAyMWgzNnYySDB6bTQgMTBoMjhjMS40NzcgMCAyLjc1Mi0uODA5IDMuNDQ1LTJILjU1NWMuNjkzIDEuMTkxIDEuOTY4IDIgMy40NDUgMnpNMTggOWgxOHYySDE4eiIvPjxwYXRoIGZpbGw9IiNFRUUiIGQ9Ik0uMDY4IDI3LjY3OWMuMDE3LjA5My4wMzYuMTg2LjA1OS4yNzcuMDI2LjEwMS4wNTguMTk4LjA5Mi4yOTYuMDg5LjI1OS4xOTcuNTA5LjMzMy43NDNMLjU1NSAyOWgzNC44OWwuMDAyLS4wMDRhNC4yMiA0LjIyIDAgMCAwIC4zMzItLjc0MSAzLjc1IDMuNzUgMCAwIDAgLjE1Mi0uNTc2Yy4wNDEtLjIyLjA2OS0uNDQ2LjA2OS0uNjc5SDBjMCAuMjMzLjAyOC40NTguMDY4LjY3OXpNMCAyM2gzNnYySDB6bTAtNHYyaDM2di0ySDE4em0xOC00aDE4djJIMTh6bTAtNGgxOHYySDE4ek0wIDl6bS41NTUtMi0uMDAzLjAwNUwuNTU1IDd6TS4xMjggOC4wNDRjLjAyNS0uMTAyLjA2LS4xOTkuMDkyLS4yOTdhMy43OCAzLjc4IDAgMCAwLS4wOTIuMjk3ek0xOCA5aDE4YzAtLjIzMy0uMDI4LS40NTktLjA2OS0uNjhhMy42MDYgMy42MDYgMCAwIDAtLjE1My0uNTc2QTQuMjEgNC4yMSAwIDAgMCAzNS40NDUgN0gxOHYyeiIvPjxwYXRoIGZpbGw9IiMzQzNCNkUiIGQ9Ik0xOCA1SDRhNCA0IDAgMCAwLTQgNHYxMGgxOFY1eiIvPjxwYXRoIGZpbGw9IiNGRkYiIGQ9Im0yLjAwMSA3LjcyNi42MTguNDQ5LS4yMzYuNzI1TDMgOC40NTJsLjYxOC40NDgtLjIzNi0uNzI1TDQgNy43MjZoLS43NjRMMyA3bC0uMjM1LjcyNnptMiAyIC42MTguNDQ5LS4yMzYuNzI1LjYxNy0uNDQ4LjYxOC40NDgtLjIzNi0uNzI1TDYgOS43MjZoLS43NjRMNSA5bC0uMjM1LjcyNnptNCAwIC42MTguNDQ5LS4yMzYuNzI1LjYxNy0uNDQ4LjYxOC40NDgtLjIzNi0uNzI1LjYxOC0uNDQ5aC0uNzY0TDkgOWwtLjIzNS43MjZ6bTQgMCAuNjE4LjQ0OS0uMjM2LjcyNS42MTctLjQ0OC42MTguNDQ4LS4yMzYtLjcyNS42MTgtLjQ0OWgtLjc2NEwxMyA5bC0uMjM1LjcyNnptLTggNCAuNjE4LjQ0OS0uMjM2LjcyNS42MTctLjQ0OC42MTguNDQ4LS4yMzYtLjcyNS42MTgtLjQ0OWgtLjc2NEw1IDEzbC0uMjM1LjcyNnptNCAwIC42MTguNDQ5LS4yMzYuNzI1LjYxNy0uNDQ4LjYxOC40NDgtLjIzNi0uNzI1LjYxOC0uNDQ5aC0uNzY0TDkgMTNsLS4yMzUuNzI2em00IDAgLjYxOC40NDktLjIzNi43MjUuNjE3LS40NDguNjE4LjQ0OC0uMjM2LS43MjUuNjE4LS40NDloLS43NjRMMTMgMTNsLS4yMzUuNzI2em0tNi02IC42MTguNDQ5LS4yMzYuNzI1TDcgOC40NTJsLjYxOC40NDgtLjIzNi0uNzI1TDggNy43MjZoLS43NjRMNyA3bC0uMjM1LjcyNnptNCAwIC42MTguNDQ5LS4yMzYuNzI1LjYxNy0uNDQ4LjYxOC40NDgtLjIzNi0uNzI1LjYxOC0uNDQ5aC0uNzY0TDExIDdsLS4yMzUuNzI2em00IDAgLjYxOC40NDktLjIzNi43MjUuNjE3LS40NDguNjE4LjQ0OC0uMjM2LS43MjUuNjE4LS40NDloLS43NjRMMTUgN2wtLjIzNS43MjZ6bS0xMiA0IC42MTguNDQ5LS4yMzYuNzI1LjYxNy0uNDQ4LjYxOC40NDgtLjIzNi0uNzI1LjYxOC0uNDQ5aC0uNzY0TDMgMTFsLS4yMzUuNzI2ek02LjM4MyAxMi45IDcgMTIuNDUybC42MTguNDQ4LS4yMzYtLjcyNS42MTgtLjQ0OWgtLjc2NEw3IDExbC0uMjM1LjcyNmgtLjc2NGwuNjE4LjQ0OXptMy42MTgtMS4xNzQuNjE4LjQ0OS0uMjM2LjcyNS42MTctLjQ0OC42MTguNDQ4LS4yMzYtLjcyNS42MTgtLjQ0OWgtLjc2NEwxMSAxMWwtLjIzNS43MjZ6bTQgMCAuNjE4LjQ0OS0uMjM2LjcyNS42MTctLjQ0OC42MTguNDQ4LS4yMzYtLjcyNS42MTgtLjQ0OWgtLjc2NEwxNSAxMWwtLjIzNS43MjZ6bS0xMiA0IC42MTguNDQ5LS4yMzYuNzI1LjYxNy0uNDQ4LjYxOC40NDgtLjIzNi0uNzI1LjYxOC0uNDQ5aC0uNzY0TDMgMTVsLS4yMzUuNzI2ek02LjM4MyAxNi45IDcgMTYuNDUybC42MTguNDQ4LS4yMzYtLjcyNS42MTgtLjQ0OWgtLjc2NEw3IDE1bC0uMjM1LjcyNmgtLjc2NGwuNjE4LjQ0OXptMy42MTgtMS4xNzQuNjE4LjQ0OS0uMjM2LjcyNS42MTctLjQ0OC42MTguNDQ4LS4yMzYtLjcyNS42MTgtLjQ0OWgtLjc2NEwxMSAxNWwtLjIzNS43MjZ6bTQgMCAuNjE4LjQ0OS0uMjM2LjcyNS42MTctLjQ0OC42MTguNDQ4LS4yMzYtLjcyNS42MTgtLjQ0OWgtLjc2NEwxNSAxNWwtLjIzNS43MjZ6Ii8+PC9zdmc+", "unit": "School Subjects"}, {"ans": "西班牙文课/西班牙文/西班牙语", "hint": "xībānyáwén kè", "img": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzNiAzNiI+PHBhdGggZmlsbD0iI0M2MEExRCIgZD0iTTM2IDI3YTQgNCAwIDAgMS00IDRINGE0IDQgMCAwIDEtNC00VjlhNCA0IDAgMCAxIDQtNGgyOGE0IDQgMCAwIDEgNCA0djE4eiIvPjxwYXRoIGZpbGw9IiNGRkM0MDAiIGQ9Ik0wIDEyaDM2djEySDB6Ii8+PHBhdGggZmlsbD0iI0VBNTk2RSIgZD0iTTkgMTd2M2EzIDMgMCAxIDAgNiAwdi0zSDl6Ii8+PHBhdGggZmlsbD0iI0Y0QTJCMiIgZD0iTTEyIDE2aDN2M2gtM3oiLz48cGF0aCBmaWxsPSIjREQyRTQ0IiBkPSJNOSAxNmgzdjNIOXoiLz48ZWxsaXBzZSBjeD0iMTIiIGN5PSIxNC41IiBmaWxsPSIjRUE1OTZFIiByeD0iMyIgcnk9IjEuNSIvPjxlbGxpcHNlIGN4PSIxMiIgY3k9IjEzLjc1IiBmaWxsPSIjRkZBQzMzIiByeD0iMyIgcnk9Ii43NSIvPjxwYXRoIGZpbGw9IiM5OUFBQjUiIGQ9Ik03IDE2aDF2N0g3em05IDBoMXY3aC0xeiIvPjxwYXRoIGZpbGw9IiM2Njc1N0YiIGQ9Ik02IDIyaDN2MUg2em05IDBoM3YxaC0zem0tOC03aDF2MUg3em05IDBoMXYxaC0xeiIvPjwvc3ZnPg==", "unit": "School Subjects"}], "shuffle": true, "level": "lenient"}/*END*/;
+const SRC = "<!DOCTYPE html>\n" + document.documentElement.outerHTML; // 页面原始代码，用于生成发布版
+const KEY = "kantushuo_v1";
+const published = () => JSON.parse(JSON.stringify(EMBED || { cards: DEMO, shuffle:true, level:"lenient" }));
+let state = load();
+
+function load() {
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.cards) return s; } catch(e) {}
+  return published();
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e) { alertBox("保存失败：图片可能太多太大。"); } }
+function alertBox(msg) { const w = document.getElementById("noSupport"); w.textContent = msg; w.classList.remove("hidden"); }
+const $ = id => document.getElementById(id);
+
+/* ---------- 模式切换（网址后面加 #teacher 才显示老师按钮） ---------- */
+function checkHash() { $("modeBtn").classList.toggle("hidden", location.hash !== "#teacher"); }
+checkHash(); addEventListener("hashchange", checkHash);
+let teacherMode = false;
+$("modeBtn").onclick = () => {
+  teacherMode = !teacherMode;
+  $("teacher").classList.toggle("hidden", !teacherMode);
+  $("student").classList.toggle("hidden", teacherMode);
+  $("modeBtn").textContent = teacherMode ? "Back to student view" : "Teacher";
+  if (teacherMode) renderList();
+};
+
+/* ---------- 老师端 ---------- */
+function picHTML(c) { return c.img ? `<img src="${c.img}" alt="">` : (c.emoji || "❓"); }
+function esc(s){ return String(s||"").replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+function renderList() {
+  $("optShuffle").checked = state.shuffle; $("optLevel").value = state.level || "lenient";
+  $("list").innerHTML = state.cards.map((c,i) => `
+    <tr><td><div class="thumb">${picHTML(c)}</div></td>
+    <td><b>${esc(c.ans)}</b>${c.unit ? ` <span style="font-size:12px;background:#eee;border-radius:6px;padding:2px 6px">${esc(c.unit)}</span>` : ""}<br><span style="color:#888">${esc(c.hint)}</span></td>
+    <td style="text-align:right"><button data-up="${i}">↑</button> <button data-del="${i}">删除</button></td></tr>`).join("")
+    || `<tr><td>还没有题目</td></tr>`;
+}
+$("list").onclick = e => {
+  const d = e.target.dataset;
+  if (d.del !== undefined) state.cards.splice(+d.del, 1);
+  else if (d.up !== undefined && +d.up > 0) { const i=+d.up; [state.cards[i-1], state.cards[i]] = [state.cards[i], state.cards[i-1]]; }
+  else return;
+  save(); renderList(); renderUnits();
+};
+$("optShuffle").onchange = e => { state.shuffle = e.target.checked; save(); };
+$("optLevel").onchange = e => { state.level = e.target.value; save(); };
+
+function shrink(file) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, 500 / Math.max(img.width, img.height));
+      const cv = document.createElement("canvas");
+      cv.width = img.width * s; cv.height = img.height * s;
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      res(cv.toDataURL("image/jpeg", 0.8));
+    };
+    img.onerror = rej;
+    img.src = URL.createObjectURL(file);
+  });
+}
+$("addBtn").onclick = async () => {
+  const ans = $("newAns").value.trim();
+  if (!ans) { $("newAns").focus(); return; }
+  const card = { ans, hint: $("newHint").value.trim(), emoji: $("newEmoji").value.trim(), unit: $("newUnit").value.trim() };
+  const f = $("newImg").files[0];
+  if (f) card.img = await shrink(f);
+  if (!card.img && !card.emoji) card.emoji = "❓";
+  state.cards.push(card); save(); renderList(); renderUnits();
+  ["newAns","newHint","newEmoji","newImg"].forEach(id => $(id).value = "");
+};
+$("exportBtn").onclick = () => {
+  const blob = new Blob([JSON.stringify(state)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "题库.json"; a.click();
+};
+$("importBtn").onclick = () => $("importFile").click();
+$("importFile").onchange = async e => {
+  try { const s = JSON.parse(await e.target.files[0].text()); if (!s.cards) throw 0; state = s; save(); renderList(); renderUnits(); }
+  catch(_) { alertBox("导入失败：文件格式不对。"); }
+};
+$("resetBtn").onclick = () => { state = published(); try { localStorage.removeItem(KEY); } catch(e) {} renderList(); renderUnits(); };
+$("publishBtn").onclick = () => {
+  const open = "/*" + "BANK*/", close = "/*" + "END*/";
+  const i = SRC.indexOf(open), j = SRC.indexOf(close, i);
+  const out = SRC.slice(0, i + open.length) + JSON.stringify(state).replace(/</g, "\\u003c") + SRC.slice(j);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([out], { type: "text/html" })); a.download = "index.html"; a.click();
+};
+function units() { return [...new Set(state.cards.map(c => c.unit).filter(Boolean))]; }
+function renderUnits() {
+  const u = units(), sel = $("stuUnit"), keep = sel.value;
+  sel.innerHTML = `<option value="">All lessons</option>` + u.map(x => `<option>${esc(x)}</option>`).join("");
+  if (u.includes(keep)) sel.value = keep;
+  $("unitWrap").classList.toggle("hidden", u.length < 2);
+  $("unitList").innerHTML = u.map(x => `<option value="${esc(x)}">`).join("");
+}
+renderUnits();
+
+/* ---------- 匹配 ---------- */
+const clean = s => (s||"").replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
+function py(s) {
+  try { return window.pinyinPro ? pinyinPro.pinyin(s, { toneType:"none", type:"array" }).join("") : null; } catch(e) { return null; }
+}
+// 返回 "exact" | "sound" | "close" | null
+function sylls(s) {
+  try { return window.pinyinPro ? pinyinPro.pinyin(s, { toneType:"none", type:"array", v:true }) : null; } catch(e) { return null; }
+}
+// 把学习者常混的音归为一类：zh/z/j, ch/c/q, sh/s/x, r/l/n, f/h, ü/u, -ng/-n
+function fuzzy(sy) {
+  let m = sy.toLowerCase().replace(/v|ü/g, "u").match(/^(zh|ch|sh|[bpmfdtnlgkhjqxrzcsyw])?(.*)$/);
+  let ini = m[1] || "", fin = m[2] || "";
+  const G = { zh:"Z", z:"Z", j:"Z", ch:"C", c:"C", q:"C", sh:"S", s:"S", x:"S", r:"L", l:"L", n:"L", f:"H", h:"H", y:"", w:"" };
+  if (ini in G) ini = G[ini];
+  fin = fin.replace(/ng$/, "n").replace(/^i(?=[aeou])/, "").replace(/^u(?=[aeio])/, "");
+  return ini + "|" + fin;
+}
+function judge(heardList, card) {
+  const level = state.level || "lenient";
+  const answers = card.ans.split("/").map(clean).filter(Boolean);
+  const heard = heardList.map(clean).filter(Boolean);
+  if (heard.some(h => answers.some(a => h.includes(a)))) return "exact";
+  if (level === "strict") return null;
+  for (const h of heard) {
+    const hs = sylls(h); if (!hs) continue;
+    for (const a of answers) {
+      const as = sylls(a); if (!as) continue;
+      if (hs.join(" ").includes(as.join(" "))) return "sound";
+      if (level !== "lenient") continue;
+      const hf = hs.map(fuzzy), af = as.map(fuzzy);
+      const allowMiss = Math.floor(af.length / 3); // 3字以上允许错1个音节
+      for (let i = 0; i + af.length <= hf.length; i++) {
+        let miss = 0;
+        for (let k = 0; k < af.length; k++) if (hf[i+k] !== af[k]) miss++;
+        if (miss <= allowMiss) return "close";
+      }
+    }
+  }
+  return null;
+}
+
+/* ---------- 学生端 ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) $("noSupport").classList.remove("hidden");
+
+let queue = [], idx = 0, results = [], tries = 0, passed = false, rec = null, listening = false;
+
+try { $("stuClass").value = localStorage.getItem(KEY + "_class") || ""; } catch(e) {}
+$("stuClass").onchange = e => { try { localStorage.setItem(KEY + "_class", e.target.value); } catch(_) {} };
+$("startBtn").onclick = () => {
+  if (!$("stuClass").value) { $("stuClass").focus(); $("stuClass").style.borderColor = "var(--red)"; return; }
+  $("stuClass").style.borderColor = "#ccc";
+  if (!state.cards.length) { alertBox("No questions yet. Ask your teacher to add some."); return; }
+  const unit = $("stuUnit").value;
+  queue = state.cards.map((c,i) => i).filter(i => !unit || state.cards[i].unit === unit);
+  if (state.shuffle) queue.sort(() => Math.random() - .5);
+  idx = 0; results = []; streak = 0; initAudio();
+  $("startPanel").classList.add("hidden");
+  $("donePanel").classList.add("hidden");
+  $("quizPanel").classList.remove("hidden");
+  showCard();
+};
+function cur() { return state.cards[queue[idx]]; }
+function showCard() {
+  tries = 0; passed = false;
+  $("progress").textContent = `Question ${idx+1} of ${queue.length}`;
+  $("pic").innerHTML = picHTML(cur());
+  $("heard").textContent = ""; $("result").textContent = ""; $("result").className = "result";
+  $("hintText").textContent = "";
+  $("nextBtn").classList.add("hidden"); $("pic").className = "pic"; $("streak").textContent = "";
+  setMicUI();
+}
+$("hintBtn").onclick = () => { const c = cur(); $("hintText").textContent = c.hint ? `Hint: ${c.hint}` : `Hint: it starts with 「${c.ans[0]}」`; };
+$("skipBtn").onclick = () => { streak = 0; results.push({ ans: cur().ans.split("/")[0], ok:false, tries, heard:$("heard").textContent }); advance(); };
+$("nextBtn").onclick = advance;
+function advance() {
+  idx++;
+  if (idx >= queue.length) finish(); else showCard();
+}
+
+/* 麦克风：只打开一次，整个闯关过程一直听（减少权限弹窗） */
+let wantListen = false;
+function setMicUI() {
+  const m = $("micBtn");
+  m.classList.toggle("listening", listening && !passed);
+  m.classList.toggle("on", listening);
+  m.textContent = listening ? "👂" : "🎤";
+  m.title = listening ? "Listening… say it!" : "Press to start the microphone";
+}
+function startRec() {
+  if (!SR) { $("noSupport").classList.remove("hidden"); return; }
+  if (!rec) {
+    rec = new SR();
+    rec.lang = "zh-CN"; rec.interimResults = true; rec.maxAlternatives = 5; rec.continuous = true;
+    rec.onresult = e => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (!passed) $("heard").textContent = "I heard: " + r[0].transcript;
+        if (r.isFinal) check(Array.from(r).map(a => a.transcript));
+      }
+    };
+    rec.onerror = e => {
+      if (e.error === "not-allowed") { wantListen = false; alertBox("Microphone blocked. Click the icon at the left of the address bar and allow the microphone."); }
+    };
+    rec.onend = () => {
+      listening = false; setMicUI();
+      // Chrome 静音一会儿会自动停，这里自动接上
+      if (wantListen) setTimeout(() => { try { rec.start(); listening = true; setMicUI(); } catch(e) {} }, 250);
+    };
+  }
+  wantListen = true;
+  try { rec.start(); listening = true; } catch(e) {}
+  setMicUI();
+}
+function stopRec() { wantListen = false; if (rec) { try { rec.stop(); } catch(e) {} } listening = false; setMicUI(); }
+$("micBtn").onclick = () => { initAudio(); listening ? stopRec() : startRec(); };
+
+/* ---------- 音效（不需要音频文件） ---------- */
+let actx = null;
+function initAudio() { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch(e) {} }
+function tone(freq, start, dur, type = "triangle", vol = 0.25) {
+  if (!actx) return;
+  const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + start;
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.02); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + dur + 0.05);
+}
+function sfxWin() { [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.09, 0.35)); [1568, 2093].forEach((f, i) => tone(f, 0.4 + i * 0.07, 0.25, "sine", 0.12)); }
+function sfxMiss() { tone(330, 0, 0.15, "sine", 0.18); tone(262, 0.13, 0.25, "sine", 0.18); }
+function sfxDone() { [523, 659, 784, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.13, i === 5 ? 0.8 : 0.22, "square", 0.12)); }
+
+/* ---------- 彩带 ---------- */
+function confetti(n = 120) {
+  const cv = $("fx"), ctx = cv.getContext("2d");
+  cv.width = innerWidth; cv.height = innerHeight;
+  const colors = ["#c8102e", "#ffd400", "#1a8a4a", "#2b7de9", "#ff7ab6", "#ff9500"];
+  const ps = Array.from({ length: n }, () => ({
+    x: cv.width / 2 + (Math.random() - .5) * 200, y: cv.height * .45,
+    vx: (Math.random() - .5) * 16, vy: -Math.random() * 16 - 6,
+    s: Math.random() * 8 + 5, r: Math.random() * 6, vr: (Math.random() - .5) * .4,
+    c: colors[Math.random() * colors.length | 0], star: Math.random() < .3
+  }));
+  let t = 0;
+  (function frame() {
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ps.forEach(p => {
+      p.vy += .45; p.vx *= .99; p.x += p.vx; p.y += p.vy; p.r += p.vr;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.c;
+      if (p.star) { ctx.font = p.s * 2.5 + "px serif"; ctx.fillText("⭐", 0, 0); }
+      else ctx.fillRect(-p.s / 2, -p.s / 4, p.s, p.s / 2);
+      ctx.restore();
+    });
+    if (++t < 110) requestAnimationFrame(frame); else ctx.clearRect(0, 0, cv.width, cv.height);
+  })();
+}
+let streak = 0;
+const CHEERS = ["Great job!", "Awesome!", "You got it!", "Super!", "Excellent!", "Nailed it!"];
+
+function check(alts) {
+  if (passed) return;
+  tries++;
+  const v = judge(alts, cur());
+  if (v) {
+    passed = true;
+    streak++;
+    const cheer = v === "close" ? "Close enough — keep practicing!" : CHEERS[Math.random() * CHEERS.length | 0];
+    $("result").className = "result ok";
+    void $("result").offsetWidth; $("result").classList.add("pop");
+    $("result").textContent = "🎉 过关！" + cheer;
+    $("streak").textContent = streak >= 2 ? `🔥 ${streak} in a row!` : "";
+    $("pic").classList.remove("win"); void $("pic").offsetWidth; $("pic").classList.add("win");
+    sfxWin(); confetti(streak >= 3 ? 180 : 110);
+    setMicUI();
+    results.push({ ans: cur().ans.split("/")[0], ok:true, tries, heard: alts[0] });
+    $("nextBtn").classList.remove("hidden");
+  } else {
+    sfxMiss();
+    $("result").className = "result no";
+    $("pic").classList.remove("shake"); void $("pic").offsetWidth; $("pic").classList.add("shake");
+    $("result").textContent = `❌ Try again (attempt ${tries})`;
+  }
+}
+
+function finish() {
+  stopRec(); sfxDone(); setTimeout(() => confetti(220), 300);
+  $("quizPanel").classList.add("hidden");
+  $("donePanel").classList.remove("hidden");
+  const ok = results.filter(r => r.ok).length;
+  const cls = $("stuClass").value;
+  const name = $("stuName").value.trim() || "(no name)";
+  $("summary").innerHTML = `<p style="font-size:22px"><b>${esc(name)}</b> (${esc(cls)}) passed <b>${ok} / ${results.length}</b></p>` +
+    results.map(r => `<div>${r.ok ? "✅" : "⏭️"} ${esc(r.ans)} ${r.ok ? `(${r.tries} ${r.tries===1?"try":"tries"})` : "(skipped)"}</div>`).join("");
+  const d = new Date();
+  $("record").value = `${cls}\t${name}\t${d.toLocaleDateString()} ${d.toLocaleTimeString()}\t${ok}/${results.length}\n` +
+    results.map(r => `${r.ans}\t${r.ok ? "passed" : "skipped"}\ttries:${r.tries}\theard:${r.heard||""}`).join("\n");
+}
+$("copyBtn").onclick = () => {
+  $("record").select();
+  navigator.clipboard?.writeText($("record").value).then(() => $("copyBtn").textContent = "Copied ✓").catch(() => document.execCommand("copy"));
+};
+$("againBtn").onclick = () => { $("donePanel").classList.add("hidden"); $("startPanel").classList.remove("hidden"); };
+</script>
+</body>
+</html>
