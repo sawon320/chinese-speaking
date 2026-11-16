@@ -51,6 +51,16 @@
   .mic.on { background:var(--green); }
   #fx { position:fixed; inset:0; pointer-events:none; z-index:99; }
   .streak { text-align:center; color:#e08a00; font-weight:bold; min-height:22px; }
+  .cert { border:3px solid var(--red); border-radius:14px; padding:16px 18px; background:#fffdf8; position:relative; }
+  .cert.fail { border-color:#999; }
+  .cert h3 { margin:0 0 8px; font-size:20px; }
+  .cert .meta { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:16px; }
+  .cert .meta b { color:var(--muted); font-weight:normal; }
+  .stamp { position:absolute; top:12px; right:14px; font-weight:bold; font-size:20px; padding:4px 12px; border:3px solid; border-radius:8px; transform:rotate(8deg); }
+  .stamp.ok { color:var(--green); } .stamp.no { color:#999; }
+  .words { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:4px 10px; margin:10px 0; font-size:15px; }
+  .code { font-family:ui-monospace,Consolas,monospace; font-size:22px; letter-spacing:2px; font-weight:bold; }
+  .shot { background:#eef5ff; border:1px solid #b9d3f5; border-radius:10px; padding:10px 14px; margin-top:12px; text-align:center; }
   textarea { width:100%; height:120px; font:inherit; font-size:14px; }
 </style>
 </head>
@@ -99,12 +109,11 @@
     </div>
 
     <div id="donePanel" class="panel hidden">
-      <h2 style="margin-top:0">All done! 🎉</h2>
-      <div id="summary"></div>
-      <label>Your record (copy and turn it in)</label>
-      <textarea id="record" readonly></textarea>
+      <h2 style="margin-top:0" id="doneTitle"></h2>
+      <p id="doneMsg" style="margin-top:0"></p>
+      <div class="cert" id="cert"></div>
+      <div class="shot">📸 <b>Take a screenshot of this page</b> (Chromebook: <b>Ctrl + ⧉</b> &nbsp;·&nbsp; Windows: <b>Win + Shift + S</b>)<br>and turn it in on Google Classroom.</div>
       <div class="row">
-        <button id="copyBtn">Copy record</button>
         <button class="primary" id="againBtn">Try again</button>
       </div>
     </div>
@@ -165,6 +174,18 @@
       </div>
       <p class="hint">修改只保存在这台电脑的浏览器里，学生看不到。<br>改好后点下面的按钮，下载新的网页文件，再上传替换网上的那个，学生就能看到新题了。</p>
       <div class="row"><button class="primary" id="publishBtn">⬇ 生成发布版网页（index.html）</button></div>
+    </div>
+      <div class="panel">
+      <h2 style="margin-top:0">验证学生截图</h2>
+      <p class="hint" style="text-align:left">照着截图输入下面几项，点「验证」。只要截图上的名字、班级、分数或时间被改过，验证码就对不上。</p>
+      <div class="grid2">
+        <div><label>班级</label><select id="vCls" style="font:inherit;padding:8px;width:100%"><option>6A</option><option>6B</option><option>6AB</option><option>6BB</option><option>7A</option><option>7B</option><option>7AB</option><option>7BB</option></select></div>
+        <div><label>名字（Name，大小写无所谓）</label><input type="text" id="vName"></div>
+        <div><label>分数（例如 7/9）</label><input type="text" id="vScore" placeholder="7/9"></div>
+        <div><label>时间（照抄，例如 11/16/2026 12:45）</label><input type="text" id="vTime" placeholder="11/16/2026 12:45"></div>
+        <div><label>验证码</label><input type="text" id="vCode" placeholder="ABC-123"></div>
+        <div style="display:flex;align-items:end;gap:10px"><button class="primary" id="vBtn">验证</button><span id="vRes" style="font-weight:bold"></span></div>
+      </div>
     </div>
   </section>
 </main>
@@ -413,7 +434,9 @@ function sfxMiss() { tone(330, 0, 0.15, "sine", 0.18); tone(262, 0.13, 0.25, "si
 function sfxDone() { [523, 659, 784, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.13, i === 5 ? 0.8 : 0.22, "square", 0.12)); }
 
 /* ---------- 彩带 ---------- */
+let fxGen = 0;
 function confetti(n = 120) {
+  const gen = ++fxGen;
   const cv = $("fx"), ctx = cv.getContext("2d");
   cv.width = innerWidth; cv.height = innerHeight;
   const colors = ["#c8102e", "#ffd400", "#1a8a4a", "#2b7de9", "#ff7ab6", "#ff9500"];
@@ -433,6 +456,7 @@ function confetti(n = 120) {
       else ctx.fillRect(-p.s / 2, -p.s / 4, p.s, p.s / 2);
       ctx.restore();
     });
+    if (gen !== fxGen) { ctx.clearRect(0, 0, cv.width, cv.height); return; }
     if (++t < 110) requestAnimationFrame(frame); else ctx.clearRect(0, 0, cv.width, cv.height);
   })();
 }
@@ -465,21 +489,54 @@ function check(alts) {
 }
 
 function finish() {
-  stopRec(); sfxDone(); setTimeout(() => confetti(220), 300);
+  stopRec();
   $("quizPanel").classList.add("hidden");
   $("donePanel").classList.remove("hidden");
-  const ok = results.filter(r => r.ok).length;
+  const ok = results.filter(r => r.ok).length, total = results.length;
+  const need = Math.min(PASS_MIN, total), pass = ok >= need;
   const cls = $("stuClass").value;
   const name = $("stuName").value.trim() || "(no name)";
-  $("summary").innerHTML = `<p style="font-size:22px"><b>${esc(name)}</b> (${esc(cls)}) passed <b>${ok} / ${results.length}</b></p>` +
-    results.map(r => `<div>${r.ok ? "✅" : "⏭️"} ${esc(r.ans)} ${r.ok ? `(${r.tries} ${r.tries===1?"try":"tries"})` : "(skipped)"}</div>`).join("");
-  const d = new Date();
-  $("record").value = `${cls}\t${name}\t${d.toLocaleDateString()} ${d.toLocaleTimeString()}\t${ok}/${results.length}\n` +
-    results.map(r => `${r.ans}\t${r.ok ? "passed" : "skipped"}\ttries:${r.tries}\theard:${r.heard||""}`).join("\n");
+  const lesson = $("stuUnit").value || "All lessons";
+  const when = fmtTime(new Date());
+  const code = vcode(cls, name, `${ok}/${total}`, when);
+  fxGen++; // 停掉还在飘的彩带
+  if (pass) { sfxDone(); setTimeout(() => confetti(220), 300); }
+  $("doneTitle").textContent = pass ? "🎉 Great job! You passed!" : "Keep practicing! 💪";
+  $("doneMsg").textContent = pass ? "" : `You need to pass at least ${need}. Press "Try again" and practice some more!`;
+  $("cert").className = "cert" + (pass ? "" : " fail");
+  $("cert").innerHTML = `
+    <div class="stamp ${pass ? "ok" : "no"}">${pass ? "PASSED ✓" : "NOT YET"}</div>
+    <h3>Say It in Chinese — Practice Record</h3>
+    <div class="meta">
+      <b>Name</b><span>${esc(name)}</span>
+      <b>Class</b><span>${esc(cls)}</span>
+      <b>Lesson</b><span>${esc(lesson)}</span>
+      <b>Time</b><span>${esc(when)}</span>
+      <b>Score</b><span><b style="color:var(--ink);font-weight:bold">${ok} / ${total}</b> passed</span>
+    </div>
+    <div class="words">${results.map(r => `<div>${r.ok ? "✅" : "⏭️"} ${esc(r.ans)}${r.ok ? ` <span style="color:#888">×${r.tries}</span>` : ""}</div>`).join("")}</div>
+    <div>Verification code: <span class="code">${code}</span></div>`;
 }
-$("copyBtn").onclick = () => {
-  $("record").select();
-  navigator.clipboard?.writeText($("record").value).then(() => $("copyBtn").textContent = "Copied ✓").catch(() => document.execCommand("copy"));
+const PASS_MIN = 5;
+function fmtTime(d) {
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+// 验证码：根据 班级+名字+分数+时间 算出来，学生改了截图上的任何一项都对不上
+function vcode(cls, name, score, when) {
+  const s = ["zw-hs-2026", cls, name.trim().toLowerCase(), score.replace(/\s/g, ""), when.trim()].join("|");
+  let h1 = 0x811c9dc5, h2 = 0x1234567;
+  for (const ch of s) { const c = ch.codePointAt(0); h1 = Math.imul(h1 ^ c, 16777619) >>> 0; h2 = Math.imul(h2 + c, 2654435761) >>> 0; }
+  const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = ""; let x = (h1 ^ (h2 >>> 7)) >>> 0;
+  for (let i = 0; i < 6; i++) { out += A[x % 32]; x = Math.floor(x / 32) ^ (i === 2 ? h2 : 0); x >>>= 0; }
+  return out.slice(0, 3) + "-" + out.slice(3);
+}
+$("vBtn").onclick = () => {
+  const code = vcode($("vCls").value, $("vName").value, $("vScore").value, $("vTime").value);
+  const typed = $("vCode").value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const ok = typed && typed === code.replace("-", "");
+  $("vRes").innerHTML = ok ? `<span class="ok">✅ 真实有效</span>` : `<span class="no">❌ 对不上（截图可能被改过，或者某一项输入有误）</span>`;
 };
 $("againBtn").onclick = () => { $("donePanel").classList.add("hidden"); $("startPanel").classList.remove("hidden"); };
 </script>
